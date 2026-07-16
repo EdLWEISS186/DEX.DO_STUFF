@@ -1,0 +1,19 @@
+# Wallet & note secrets — NEVER commit these
+*.seed
+*seed_file*
+*seed_v*
+note.secret.hex
+*_note.secret.hex
+*.secret.hex
+pn_pool*.json
+pn_pool*.json.recovery.json
+*.recovery.json
+
+# API keys
+.env
+*_API_KEY*
+
+# dexdo local runtime/cache
+target/
+params/
+market*.json

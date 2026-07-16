@@ -1,0 +1,193 @@
+# dexdo CLI — Seller `postSellOffer` Investigation Log
+**Network:** shellnet (Acki Nacki testnet) · **CLI version:** dexdo 0.0.7 (Linux x86_64) · **Model:** `qwen--qwen3--32b`
+**Date range:** 2026-07-08 19:00 UTC – 2026-07-09 03:40 UTC
+**Account:** jeruzzalem
+
+---
+
+## 1. Summary
+
+- **Buyer side works correctly end-to-end.** Two real matches occurred against live order-book asks; both times the counterparty seller failed to open the handover stream, and the configured buyer policy (`no_handover_after_match: wait_then_reclaim`) correctly auto-reclaimed 100% of escrow in both cases. No funds were lost or stuck at any point.
+- **Seller side has a reproducible bug.** Across three separate `provision` + `seller` attempts (different nonces), the seller's offer never became visible/executable in the shared `InferenceOrderBook`, despite `provision` and `fundDeployShell` completing successfully on-chain each time.
+- **Independently corroborated.** A different, unrelated user in the project's Telegram community reported the identical symptom in the same time window ("posted... nvm it closed itself").
+- **Reported to the team** via the app's support channel and to the community Telegram thread, both including token_contract addresses/nonces/timestamps for reproduction.
+
+---
+
+## 2. Environment / setup verification
+
+```
+$ dexdo --version
+dexdo 0.0.7
+
+$ dexdo doctor
+dexdo doctor: PASS network=shellnet
+versions:
+  SuperRoot: 4.0.18 SuperRoot
+  RootPN: 4.0.18 RootPN
+  RootOracle: 4.0.18 RootOracle
+checks:
+  PASS shellnet endpoint - reachable
+  SKIP SuperRoot code hash - fixed-superroot shellnet redeploy uses the 0:0c0c... zerostate anchor
+  SKIP DappConfig account - fixed-superroot shellnet redeploy has no legacy DappConfig manifest account
+  PASS RootPN code hash - binary pin matches live shellnet
+  PASS RootOracle code hash - binary pin matches live shellnet
+  PASS PrivateNote code hash (RootPN pin) - binary pin matches live shellnet
+```
+
+**Identities used:**
+- Buyer PrivateNote: `0:664508bf591d832ee0c06bc398cfe4db5ec8436f6698ee7e0670bd16f2dbe238` (N10000, funded from DEX.DO web-wallet multisig)
+- Seller PrivateNote: `0:58c3d7d6c0c604059880c69207799ea57fa854c9204d8c79c5dc45ffa9a1484c` (N1000, same funding wallet)
+- Funding multisig (DEX.DO web wallet): `0:66d927fccbf9dc6fbf7974ffd3d4005f0bea39d26a1b4ede879eea5e6aa51e41`
+- InferenceOrderBook (qwen--qwen3--32b): `0:6330b82c9d866f68e989d4f71c79e6f4757602c065933b7e63179b00acd9aa0e`
+
+---
+
+## 3. Buyer side — working as designed (for contrast/reference)
+
+### 3.1 First match — seller no-show, full auto-reclaim
+```
+matched deal TokenContract: 0:db9286ea891228fb7c4023d3f765d45edc194d1dbcef14fc5395725865d261b0
+matched deal state: funded=true opened=false ...
+2026-07-08T22:58:13Z buyer continuity: reclaimed current opened idle deal
+  settlement=SellerNoShow { to_buyer_refund: 6, seller_commission_returned: 0 }
+```
+
+### 3.2 Second match (earlier session) — same pattern
+```
+matched deal TokenContract: 0:43d34ea0583042421d1925812cbd5f5ca4449910275635cc76ef2fd72ff6744f
+...
+policy_action failure_class=no_handover_after_match action=wait_then_reclaim
+  result=cleanup_unopened_submitted
+  result=money_reclaimed settlement=SellerNoShow { to_buyer_refund: 20500, seller_commission_returned: 0 }
+```
+
+### 3.3 Buyer continuity engine — 1+ hour of unattended, correct auto-retry
+Representative excerpt (full session ran 22:48 → 03:35+, cycling every ~30s without manual intervention):
+```
+2026-07-09T01:10:36Z WARN buyer continuity: fresh buy submit/match failed
+  error=... best ask price 1000000 is above buyer max_price_per_tick 5000 ...
+  IOB stats OrderBookStats { next_order_id: 790, order_count: 68, executed_notional: 1174847015, executed_ticks: 162495 }
+2026-07-09T03:35:05Z WARN buyer continuity: fresh buy submit/match failed
+  error=... best ask price 1000000 is above buyer max_price_per_tick 5000 ...
+  IOB stats OrderBookStats { next_order_id: 799, order_count: 69, executed_notional: 1196147015, executed_ticks: 162525 }
+```
+`best_ask` never moved off `1000000` for the entire window our own offer (price 5) was supposedly live — see §4.3.
+
+**Conclusion:** buyer logic, escrow safety, and policy-driven recovery are all functioning correctly.
+
+---
+
+## 4. Seller side — reproducible failure across 3 nonces
+
+### 4.1 Attempt 1 — `nonce=1`, explicit rejection
+```
+$ dexdo provision --frame-model qwen--qwen3--32b --nonce 1 --price-per-tick 5 \
+    --max-ticks 10 --deposit-shells 20 --output market_seller.json
+provisioned market -> market_seller.json
+  token_contract: 0:ea36ee70d8567998be58b135e15919758ea981ce2686c17bcb3b3746dfa8b1bf
+
+$ dexdo seller --market market_seller.json --model qwen--qwen3--32b --price-per-tick 5 --mock-model
+posting offer: 10 ticks (= 10000000 model tokens) at 5 SHELL/tick
+Error: shellnet: seller offer did not rest in the InferenceOrderBook
+  0:6330b82c9d866f68e989d4f71c79e6f4757602c065933b7e63179b00acd9aa0e after posting
+  (no resting order with our tokenContract 0:ea36ee70... after ~16s)
+  -- most likely the offer's tokenContract is not the canonical (sellerPubkey, nonce) TC for this note
+  IOB stats {"nextOrderId":"789","orderCount":"67","executedNotional":"1174847015","executedTicks":"162495"}
+```
+
+### 4.2 Attempt 2 — `nonce=2`, silent failure (no error, but never resting)
+```
+$ dexdo provision ... --nonce 2 ... --output market_seller.json
+  token_contract: 0:aa5b4e348e1611f0fe3f40467cebecf0d849919dec3da2dbaf8de4290a664503
+
+$ dexdo seller --market market_seller.json ...
+posting offer: 10 ticks (= 10000000 model tokens) at 5 SHELL/tick
+INFO seller posting offer, awaiting buy + match token_contract=0:aa5b4e34...
+(no further output; process ran unattended)
+
+# Verification via monitor (read-only):
+$ dexdo monitor --note-key seller_note.secret.hex --note-addr $SELLER_NOTE_ADDR \
+    --market market_seller.json --contracts contracts/deployed.shellnet.json
+identity note tree (1 sub-notes polled):
+  * 0:58c3d7d6c0c604059880c69207799ea57fa854c9204d8c79c5dc45ffa9a1484c
+tree exposure (at risk): 0 SHELL
+offers in book: 0
+deals: 1
+  * 0:aa5b4e34... [seller] counterparty --(no match) * 5 SHELL/tick
+    ... locked(buyer 0, seller 0) / burn 0
+```
+`offers in book: 0` confirms the offer never registered, despite no error being surfaced to the operator.
+
+### 4.3 Attempt 3 — `nonce=3`, automated pre-check + live monitoring
+Built a script to `provision` → poll `dexdo status <TC>` every 20s until `funded=true` → only then run `dexdo seller`. Poll never reached `funded=true` in 10 minutes (30 attempts):
+```
+[attempt 1/30] state=placed active=true funded=false opened=false ... deposit=0 ... funded_time=0
+[attempt 30/30] state=placed active=true funded=false opened=false ... deposit=0 ... funded_time=0
+TIMEOUT: TokenContract never reached funded=true after 10 minutes.
+```
+Ran `dexdo seller` anyway (against the existing, already-deployed TC `0:3d4f9c3c324697959c68a7063c5fd4b66f9e0d6b995388940689c4702f69065e`) while live-watching `dexdo status` in a separate terminal (`watch -n 3`):
+```
+$ dexdo seller --market market_seller_n3.json --model qwen--qwen3--32b --price-per-tick 5 --mock-model
+posting offer: 10 ticks (= 10000000 model tokens) at 5 SHELL/tick
+INFO seller posting offer, awaiting buy + match token_contract=0:3d4f9c3c32...
+```
+No error for **over an hour** (02:42 → 03:40+ UTC). `watch` output at two points ~55 minutes apart, byte-for-byte identical:
+```
+[09:40:07] status ... state=placed active=true funded=false opened=false ... deposit=0 ... funded_time=0
+[10:35:12] status ... state=placed active=true funded=false opened=false ... deposit=0 ... funded_time=0
+```
+
+**Final confirmation — order book snapshot during this window:**
+```
+$ dexdo market qwen--qwen3--32b --note-addr $NOTE_ADDR --models models.json \
+    --contracts contracts/deployed.shellnet.json
+inference order book -- qwen--qwen3--32b  (1 tick = 1000000 model tokens)
+---------------------------------------------------------------------------------------------------
+- # - price/tick - max ticks - tokenContract                                                      -
+---------------------------------------------------------------------------------------------------
+- 1 -    1000000 -         2 - 0:9aff5b8520caf32dbb91390134a946fc9c2896830d96b86cb0f1fbd2262dbe36 -
+---------------------------------------------------------------------------------------------------
+```
+Our TokenContract (`0:3d4f9c3c...`) is **absent from the book entirely** — not merely non-executable. Only one unrelated third-party order (price 1,000,000) is present.
+
+---
+
+## 5. Independent community corroboration
+
+A different user in the project's Telegram channel, same day, unprompted:
+> "I have just posted token_contract=0:ce8a6b3908196b26a28ba4dd6863fa136ef72e0b3cbc6d3d2b503963bbbf8408 if you want to try buying."
+> "Edit: Nvm it closed itself"
+
+Same symptom class (offer posted, then effectively vanishes / never becomes tradeable), independent account, same day.
+
+---
+
+## 6. Secondary issue noticed (not blocking, but worth flagging)
+
+`dexdo policy init` produces a schema that accepts `seller.on.after_deal_done = republish_with_backoff` and `seller.on.buyer_no_show = cleanup_and_republish` as valid values, but the seller runtime rejects them at startup:
+```
+Error: policy_action failure_class=policy_validation action=fail_closed ...
+  unsupported_choices=seller.on.after_deal_done=republish_with_backoff,seller.on.buyer_no_show=cleanup_and_republish
+  next_action=edit_policy
+  diagnostic=seller runtime cannot execute fresh-TC republish or buyer-side cleanup_unopened from this seller daemon
+  before/following an offer; supported seller terminal actions today are
+  seller.on.after_deal_done=retire and seller.on.buyer_no_show=retire_gateway
+```
+Schema-vs-runtime mismatch: values that validate against the documented schema are not actually implemented yet.
+
+---
+
+## 7. Root-cause hypothesis (unconfirmed — for the team to verify)
+
+Across all 3 attempts, `provision`'s on-chain `fundDeployShell` step completed and the note-side accounting looked correct, but the subsequent `postSellOffer` step (run by `dexdo seller`) never resulted in the offer becoming a resting, executable row in the shared `InferenceOrderBook` contract. One run failed loudly and immediately (attempt 1); two runs failed silently with no operator-facing error at all (attempts 2 & 3), which is arguably the more serious issue since a seller has no way to know their offer isn't live without manually cross-checking `dexdo monitor`/`dexdo market` from a second identity.
+
+Given the community report of the same symptom independently, this looks like a bug on the `postSellOffer` → `InferenceOrderBook` registration path in dexdo v0.0.7 / the current shellnet deployment, rather than a local configuration issue.
+
+---
+
+## 8. What's safe / unaffected
+
+- No escrowed funds are stuck. Buyer-side reclaims were 100% successful both times.
+- All spent amounts were shellnet testnet tokens (not real value): ~2×20 SHELL provisioning gas (nonces 1 & 3; nonce 2 also ~20 SHELL) plus normal note-deploy fees.
+- Both PrivateNotes (buyer & seller) remain valid and reusable once the underlying issue is fixed — no need to redeploy identities, only to retry `provision`/`seller` once there's a fix or guidance from the team.
