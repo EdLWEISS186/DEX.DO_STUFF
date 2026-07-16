@@ -1,6 +1,6 @@
 # DEX.DO Stuff
 
-Personal documentation, test reports, and setup notes for using the [`dexdo`](https://github.com/gosh-sh/dexdo-cli) CLI on the Acki Nacki shellnet testnet, maintained by [jeruzzalem](https://github.com/jeruzzalem).
+Personal documentation, test reports, and setup notes for using the [`dexdo`](https://github.com/gosh-sh/dexdo-cli) CLI on the Acki Nacki shellnet testnet, maintained by [jeruzzalem](https://github.com/EdLWEISS186).
 
 This is an **independent, unofficial** documentation repo — not affiliated with or maintained by the GOSH/dexdo team. It's a personal log of setup steps, bugs encountered, and findings while testing the DEX.DO inference marketplace.
 
