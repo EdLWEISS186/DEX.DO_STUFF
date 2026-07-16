@@ -15,8 +15,8 @@ This is an **independent, unofficial** documentation repo — not affiliated wit
 
 | Date | dexdo version | Summary |
 |---|---|---|
-| [2026-07-09](./reports/2026-07-09_v0.0.7_seller_offer_not_resting.md) | v0.0.7 | Seller offers fail to rest in the `InferenceOrderBook` after `postSellOffer`; buyer-side escrow/reclaim logic confirmed working correctly. |
-| [2026-07-16](./reports/2026-07-16_v0.0.12_retest.md) | v0.0.12 | Retest after upgrade: seller-side issue from the 2026-07-09 report appears fixed. New buyer-side bug found (`buyer pre-submit matcher head differs from the rendered quote`) with evidence the order book was static during the failure window. |
+| [2026-07-09](./reports/2026-07-09_v0.0.7.md) | v0.0.7 | Seller offers fail to rest in the `InferenceOrderBook` after `postSellOffer`; buyer-side escrow/reclaim logic confirmed working correctly. |
+| [2026-07-16](./reports/2026-07-16_v0.0.12.md) | v0.0.12 | Retest after upgrade: seller-side issue from the 2026-07-09 report appears fixed. New buyer-side bug found (`buyer pre-submit matcher head differs from the rendered quote`) with evidence the order book was static during the failure window. |
 
 ## Disclosure
 
